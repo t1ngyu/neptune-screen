@@ -1,0 +1,5 @@
+pyserial
+pyserial-asyncio
+requests
+Pillow
+moonraker-api

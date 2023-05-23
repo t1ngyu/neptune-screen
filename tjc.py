@@ -1,0 +1,442 @@
+import time
+import struct
+import serial
+import asyncio
+import serial_asyncio
+import logging
+from pathlib import Path
+
+logger = logging.getLogger('TJC')
+logger.setLevel(logging.DEBUG)
+
+import functools
+def my_decorator(f):
+    cached = {}
+    @functools.wraps(f)
+    def wrapper(self, name, value):
+        if name not in cached or cached[name] != value:
+            cached[name] = value
+            return f(self, name, value)
+    return wrapper
+
+class ScreenMixin:
+    debug = True
+
+    def send_cmd(self, msg):
+        data = bytearray()
+        if isinstance(msg, str):
+            if self.debug:
+                logger.debug(f'<send_cmd> {msg}')
+            data.extend(msg.encode('utf-8'))
+        elif isinstance(msg, (bytes, bytearray)):
+            data.extend(msg)
+        else:
+            logger.error(type(msg))
+            raise Exception()
+        data.extend(bytes([0xff, 0xff, 0xff]))
+        self.write(data)
+
+    def sys_init(self, url, version):
+        self.send_cmd(f'information.klipper_ver.txt="{version}"')
+        self.send_cmd(f'information.url.txt="{url}"')
+    
+    def page_boot(self):
+        logger.info('Page: boot')
+        self.send_cmd('page boot')
+        self.send_cmd('boot.tm_notify.en=1')
+
+    def page_main_init(self):
+        logger.info('Page: main')
+        self.send_cmd('page main')
+    
+    @my_decorator
+    def set_control_value(self, name, value):
+        if isinstance(value, str):
+            if name == 'main.nozzletemp.txt':
+                self.debug = False
+            self.send_cmd(f'{name}="{value}"')
+        else:
+            self.send_cmd(f'{name}={value}')
+
+    def global_update(self, **vals):
+        if 'extruder_temp' in vals:
+            text = f'{vals["extruder_temp"]:3.0f} / {vals["extruder_target_temp"]:0.0f}'
+            self.set_control_value('main.nozzletemp.txt', text)
+        if 'bed_temp' in vals:
+            text = f'{vals["bed_temp"]:3.0f} / {vals["bed_target_temp"]:0.0f}'
+            self.set_control_value('main.bedtemp.txt', text)
+        if 'led_state' in vals:
+            val = 0 if vals['led_state'] == 0 else 1
+            self.set_control_value('led_state', val)
+        if 'fan_speed' in vals:
+            val = int(vals['fan_speed'] * 100)
+            self.set_control_value('fan_speed', val)
+        if 'print_state' in vals:
+            val = 1 if vals['print_state'] == 'paused' else 0
+            self.set_control_value('paused', val)
+   
+    def page_file(self, page, page_max, file_list, file_ext_list, path):
+        self.send_cmd(f'file.page.val={page}')
+        self.send_cmd(f'file.page_max.val={page_max}')
+        self.send_cmd(f'file.item_list.txt="{file_list}"')
+        self.send_cmd(f'file.item_ext_list.txt="{file_ext_list}"')
+        self.send_cmd(f'file.dir.txt="{path}"')
+        self.send_cmd('click load_list,1')
+
+    async def page_ask_print(self, thumbnail):
+        self.send_cmd('exp0.path=""')
+        if thumbnail:
+            success = await asyncio.to_thread(self.upload_file_to_ram, thumbnail, 't.jpg')
+            if success:
+                self.send_cmd('exp0.path="ram/t.jpg"')
+                self.send_cmd('name.aph=0')
+
+    def page_printing_init(self, filename=None, thumbnail=None):
+        logger.info('Page: printpause')
+        self.send_cmd('page printpause')
+        if filename is not None:
+            self.send_cmd(f'filename.txt="{Path(filename).stem}"')
+        if thumbnail:
+            self.upload_file_to_ram(thumbnail, 't.jpg')
+            self.send_cmd('exp0.path="ram/t.jpg"')
+
+    def page_printing_update(self, progress, print_time, z, print_speed):
+        self.set_control_value('printprocess.val', int(progress*100))
+        self.set_control_value('printvalue.txt', str(int(progress*100)))
+        self.set_control_value('printtime.txt', print_time)
+        self.set_control_value('zvalue.val', int(z*100))
+        self.set_control_value('printspeed.txt', int(print_speed*100))
+
+    def page_finish(self):
+        self.send_cmd('page finished')
+
+    def page_home(self):
+       self.send_cmd('page warn_rdlevel') 
+
+    def page_leveling(self, matrix, offset):
+        logger.info('Page: leveling')
+        if not matrix or not matrix[0]:
+            matrix = [[0] * 6] * 6
+        index = 0
+        for idx, row in enumerate(matrix):
+            if idx % 2 == 1:
+                for col in row:
+                    self.send_cmd(f'x{index}.val={int(col*100)}')
+                    index += 1
+            else:
+                for col in row[::-1]:
+                    self.send_cmd(f'x{index}.val={int(col*100)}')
+                    index += 1
+
+
+    def create_thumbnail(self, filename, width, height, fillcolor=0):
+        import io
+        from PIL import Image
+        im = Image.open(filename)
+        im = im.rotate(270, expand=True)
+        w, h = im.size
+        if w != width or h != height:
+            scale_w = w / width
+            scale_h = h / height
+            if scale_w != scale_h:
+                if scale_w > scale_h:
+                    new_w = w
+                    new_h = int(height * scale_w)
+                    pos = (0, (new_h - h) // 2)
+                else:
+                    new_w = int(width * scale_h)
+                    new_h = h
+                    pos = ((new_w - w) // 2, 0)
+                new_im = Image.new('RGB', (new_w, new_h), fillcolor)
+                new_im.paste(im, pos)
+                im = new_im
+            im = im.resize((width, height))
+        fp = io.BytesIO()
+        im = im.convert('RGB')
+        im.save(fp, format='jpeg')
+        return fp.getvalue() 
+
+    def upload_file_to_ram(self, data, dst):
+        # clear screen state
+        self.ser.write(b'\x00\xff\xff\xff')
+        time.sleep(0.05)
+        self.ser.write(f'twfile "ram/{dst}",{len(data)}'.encode() + b'\xff\xff\xff')
+        val = self.ser.read(4)
+        if val[0] != 0xfe:
+            logger.error(f'twfile: status={val.hex(" ")}')
+            return False
+
+        header = bytearray.fromhex('3a a1 bb 44 7f ff fe')
+        chunk_no = 0
+        chunk_size = 4096
+        i = 0
+        while i < len(data):
+            wsize = chunk_size
+            if len(data) - i < chunk_size:
+                wsize = len(data) - i
+            info = struct.pack('<BHH', 0, chunk_no, wsize)
+            # logger.debug(f'[{n}] {i:5d}, {wsize:5d} / {len(data):5d}')
+            # logger.debug((header + info).hex(' '))
+            self.ser.write(header)
+            self.ser.write(info)
+            self.ser.write(data[i:i+wsize])
+            i += wsize
+            chunk_no += 1
+            val = self.ser.read(1)
+            if not val or (i != len(data) and val[0] != 0x05) or (i == len(data) and val[0] != 0xfd):
+                logger.error(f'ret: {val.hex(" ")}')
+                return False
+        self.ser.write(b'\x00\xff\xff\xff')
+        return True
+
+    def scan_device(self):
+        baudrate_list = (512000, 921600)
+        for baudrate in baudrate_list:
+            # dtime = (1000000 / baudrate + 50) / 1000
+            self.ser.apply_settings({'baudrate': baudrate, 'timeout': 0.2})
+            settings = self.ser.get_settings()
+            logger.debug(settings)
+            self.ser.write(b'\x00\xff\xff\xff')
+            self.ser.write(b'\x00\xff\xff\xff')
+            time.sleep(0.1)
+            self.ser.write(b'connect\xff\xff\xff')
+            data = self.ser.read(10)
+            if data and b'comok' in data:
+                logger.debug('found baudrate')
+                return True
+
+    def download_firmware(self, firmware):
+        if not self.scan_device():
+            return False
+        
+        with open(firmware, 'rb') as fp:
+            content = fp.read()
+        # 让屏幕进入卡顿2.5秒,防止现有工程不断发送数据干扰下载
+        self.ser.write(b'delay=2500\xff\xff\xff')
+        # 1.5秒后发下载指令
+        time.sleep(1.5)
+        self.ser.write(f'whmi-wri {len(content)},921600,0'.encode() + b'\xff\xff\xff')
+        status = self.ser.read(10)
+        logger.debug(f'status1: {status}')
+        self.ser.apply_settings({'baudrate': 921600, 'timeout': 0.5})
+        time.sleep(0.13)
+        self.ser.reset_input_buffer()
+        status = self.ser.read()
+        logger.debug(f'status: {status}')
+        if status and status[0] == 0x05:
+            CHUNK_SIZE = 4096
+            i = 0
+            while i < len(content):
+                chunk = content[i : i + CHUNK_SIZE]
+                # logger.debug(f'chunk[{i}/{len(content)}]')
+                self.ser.write(chunk)
+                status = self.ser.read()
+                if not status or status[0] != 0x05:
+                    return False
+                i += len(chunk)
+        return True
+
+    def set_fan(self, enable):
+        self.ser.rts = True if enable else False
+
+
+class TJC(ScreenMixin):
+    def __init__(self, port):
+        self.ser = serial.Serial(port, 115200, timeout=0.5)
+
+    def write(self, msg):
+        self.ser.write(msg)
+
+    def send_pic_from_txt_file(self, page, filename):
+        with open(filename, 'rb') as fp:
+            content = fp.read()
+        self.send_raw(b"printpause.va0.txt=")
+        self.send_raw(b'"')
+        self.send_raw(content)
+        self.send_raw(b'"')
+        self.send_raw(b"\xff\xff\xff")
+        time.sleep(0.1)
+        self.send_cmd(f"printpause.va1.txt=printpause.va0.txt")
+        time.sleep(0.2)
+        self.send_cmd(f"{page}.cp0.aph=127")
+        self.send_cmd(f"{page}.cp0.write(printpause.va1.txt)")
+
+    def send_pic_from_log_file(self, filename):
+        with open(filename, 'r') as fp:
+            lines = fp.readlines()
+        
+        for line in lines[912:956]:
+            if line.startswith('[delay]'):
+                delay = int(line.strip('\r\n').split(']')[1])
+                time.sleep(delay / 1000)
+            elif line.startswith('[write]'):
+                data = bytes.fromhex(line.strip('\r\n').split(']')[1])
+                self.send_raw(data)
+            else:
+                logger.debug(line.strip('\r\n'))
+
+    def send_pic_from_gcode_file(self, page, filename):
+        self.send_cmd(f"{page}.cp0.close()")
+        self.send_cmd(f"{page}.cp0.aph=0")
+        self.send_cmd("printpause.va1.txt=\"\"")
+        with open(filename, 'rb') as fp:
+            begin = False
+            while True:
+                data = fp.read(1024)
+                if not begin:
+                    if data.startswith(b';simage'):
+                        begin = True
+                    else:
+                        continue
+                logger.debug(data[:10], '....', data[-10:].hex(' '))
+                if data.startswith(b';simage'):
+                    self.send_raw(b"printpause.va0.txt=")
+                    self.send_raw(b'"')
+                    self.send_raw(data[8:1023])
+                    self.send_raw(b'"')
+                    self.send_raw(b"\xff\xff\xff")
+                    time.sleep(0.2)
+                    self.send_cmd("printpause.va1.txt+=printpause.va0.txt")
+                elif data.startswith(b';;simage'):
+                    self.send_raw(b"printpause.va0.txt=")
+                    self.send_raw(b'"')
+                    self.send_raw(data[9:1023])
+                    self.send_raw(b'"')
+                    self.send_raw(b"\xff\xff\xff")
+                    time.sleep(0.2)
+                    self.send_cmd("printpause.va1.txt+=printpause.va0.txt")
+                    self.send_cmd(f"{page}.cp0.aph=127")
+                    self.send_cmd(f"{page}.cp0.write(printpause.va1.txt)")
+                    break
+                elif data.startswith(';00000'):
+                    self.send_cmd(f"{page}.cp0.aph=127")
+                    self.send_cmd(f"{page}.cp0.write(printpause.va1.txt)")
+                    break
+
+    def upload_file_to_ram(self, data, dst):
+        self.ser.reset_input_buffer()
+        self.send_raw(b'\x00\xff\xff\xff')
+        time.sleep(0.01)
+        self.send_cmd(f'twfile "ram/{dst}",{len(data)}')
+        val = self.read(4)
+        logger.debug(val.hex(' '))
+        time.sleep(0.3)
+        header = bytearray.fromhex('3a a1 bb 44 7f ff fe')
+        n = 0
+        chunk_size = 4000
+        for i in range(0, len(data), chunk_size):
+            wsize = chunk_size
+            if len(data) - i < chunk_size:
+                wsize = len(data) - i
+            info = struct.pack('<BHH', 0, n, wsize)
+            logger.debug(f'[{n}] {i:5d}, {wsize:5d} / {len(data):5d}')
+            self.send_raw(header + info)
+            logger.debug((header + info).hex(' '))
+            self.send_raw(data[i:i+wsize])
+            time.sleep(0.01)
+            val = self.read(1)
+            logger.debug(val.hex(' '))
+            n += 1
+        time.sleep(0.01)
+        self.send_raw(b'\x00\xff\xff\xff')
+        self.ser.reset_input_buffer()
+
+    def read(self, n=1):
+        return self.ser.read(n)
+    
+
+class AsyncSerialScreenProtocol(asyncio.Protocol):
+    on_request = None
+
+    def connection_made(self, transport):
+        self.transport = transport
+        self.recv_data = bytearray()
+
+    def data_received(self, data):
+        self.recv_data.extend(data)
+        while len(self.recv_data) >= 3:
+            if self.recv_data[0] != 0x5a or self.recv_data[1] != 0xa5:
+                logger.debug(f'{self.recv_data[0]:02x} ', end='')
+                self.recv_data.pop(0)
+                continue
+            packet_size = self.recv_data[2]
+            if len(self.recv_data) < 3 + packet_size:
+                break
+            packet = self.recv_data[0:3+packet_size]
+            # logger.debug(f'packet: {packet.hex(" ")}')
+            if self.on_request:
+                data = packet[3:]
+                asyncio.create_task(self.on_request(data.decode('utf-8')))
+            self.recv_data = self.recv_data[len(packet):]
+            
+    def pause_reading(self):
+        # This will stop the callbacks to data_received
+        self.transport.pause_reading()
+
+    def resume_reading(self):
+        # This will start the callbacks to data_received again with all data that has been received in the meantime.
+        self.transport.resume_reading()
+
+class AsyncTJCScreen(ScreenMixin):
+
+    def __init__(self):
+        self.transport = None
+        self.protocol = None
+        self.ser = None
+
+    async def start(self, port, baudrate=115200):
+        self.transport, self.protocol = await serial_asyncio.create_serial_connection(asyncio.get_event_loop(), AsyncSerialScreenProtocol, port, baudrate=baudrate)
+        self.ser = self.transport.serial
+
+    def set_request_handler(self, handler):
+        self.protocol.on_request = handler
+
+    def write(self, data):
+        self.transport.write(data)
+
+    def test(self, transport:serial_asyncio.SerialTransport):
+        transport.pause_reading
+
+    def start_raw_serial(self):
+        # stop reading & set timeout=0
+        self.settings = self.ser.get_settings()
+        self.transport.pause_reading()
+        self.ser.reset_input_buffer()
+        self.ser.apply_settings({'timeout': 100})
+    
+    def end_raw_serial(self):
+        # restore settings & read
+        self.ser.reset_input_buffer()
+        self.transport.resume_reading()
+        self.ser.apply_settings(self.settings)
+
+    def upload_file_to_ram(self, data, dst):
+        logger.debug('Switch serial to sync mode.')
+        self.start_raw_serial()
+        try:
+            return super().upload_file_to_ram(data, dst)
+        except:
+            pass
+        finally:
+            logger.debug('Switch serial back to async mode.')
+            self.end_raw_serial()
+
+    def download_firmware(self, firmware):
+        logger.debug('Switch serial to sync mode.')
+        self.start_raw_serial()
+        try:
+            return super().download_firmware(firmware)
+        except:
+            pass
+        finally:
+            logger.debug('Switch serial back to async mode.')
+            self.end_raw_serial()
+
+
+if __name__ == '__main__':
+    tjc = TJC('COM2')
+    # tjc.scan_device()
+    im = tjc.create_thumbnail('test.png', 160, 240, (255,0,0))
+    tjc.upload_file_to_ram(im, '0.jpg')
+    tjc.send_cmd('exp0.path="ram/0.jpg"')
+    logger.debug('done')

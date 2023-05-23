@@ -1,0 +1,7 @@
+{
+    "Serial": "/dev/serial/by-path/platform-ci_hdrc.0-usb-0:1.1:1.0-port0",
+    "Baudrate": 512000,
+    "Moonraker": "127.0.0.1",
+    "FanStartTemp": 51,
+    "FanStopTemp": 49
+}
