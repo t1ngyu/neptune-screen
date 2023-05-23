@@ -6,6 +6,7 @@ if [ ! -d ~/printer_data ]; then
 	exit 1
 fi
 
+sudo apt install python3-venv
 # setup venv
 python3 -m venv venv
 venv/bin/python3 -m pip install -r requirements.txt
@@ -16,7 +17,6 @@ echo WorkingDirectory=`pwd` >> NeptuneScreen.service
 echo ExecStart=`pwd`/venv/bin/python `pwd`/neptune-screen.py >> NeptuneScreen.service
 echo Restart=always >> NeptuneScreen.service
 
-if [ -e  ]
 # install moonraker managed_services
 if ! grep -q 'NeptuneScreen' ~/printer_data/moonraker.asvc ; then
 	echo NeptuneScreen >> ~/printer_data/moonraker.asvc
