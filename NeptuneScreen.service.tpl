@@ -11,4 +11,6 @@ Type=simple
 User=klipper
 SupplementaryGroups=moonraker-admin
 RemainAfterExit=yes
-
+WorkingDirectory=ROOT_DIR
+ExecStart=ROOT_DIR/venv/bin/python ROOT_DIR/neptune-screen.py
+Restart=always

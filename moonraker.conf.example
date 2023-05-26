@@ -1,0 +1,9 @@
+
+
+[update_manager NeptuneScreen]
+type: git_repo
+channel: dev
+path: ~/neptune-screen
+origin: https://github.com/t1ngyu/neptune-screen.git
+is_system_service: True
+managed_services: NeptuneScreen
