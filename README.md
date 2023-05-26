@@ -4,10 +4,8 @@
 ## 安装说明
 
 1. 升级屏幕固件*.tft
-2. 通过ssh登录Klipper主机，切换到klipper用户，克隆本仓库，并安装（安装服务需要root权限，安装过程中会提示输入root用户密码）
+2. 通过ssh使用klipper用户登录Klipper主机，克隆本仓库，并安装（安装服务需要root权限，安装过程中会提示输入root用户密码）
     ```bash
-    su klipper
-    cd ~
     git clone https://github.com/t1ngyu/neptune-screen.git
     bash neptune-screen/setup.sh
     ```
@@ -48,19 +46,16 @@
 
 6. Fluidd界面右上角，弹出菜单中 "服务" 一栏中重启NeptuneScreen服务。
 
-7. （可选步骤）Fluidd界面支持更新NeptuneScreen
 
-    浏览器打开Fluidd（kilpper的web界面），"配置" 页面内编辑moonraker.conf，加入以下内容，即可在 "设置" -> "软件更新" 处更新NeptuneScreen程序
-    ```ini
-    [update_manager NeptuneScreen]
-    type: git_repo
-    channel: dev
-    path: ~/neptune-screen
-    origin: https://github.com/t1ngyu/neptune-screen.git
-    is_system_service: True
-    managed_services:
-    NeptuneScreen
-    ```
+## 更换安装源
+
+考虑github有时访问速度比较慢，仓库在gitee做了镜像，安装说明第二步中将地址换为gitee仓库地址即可；
+```bash
+git clone https://github.com/t1ngyu/neptune-screen.git
+改为
+git clone https://gitee.com/t1ngyu/neptune-screen.git
+```
+
 
 ## 注意事项
 
@@ -68,7 +63,7 @@
 
 * 海王星专用HUB上的USB转串口芯片与海王星主板的USB转串口芯片的VID/PID一样，因此串口路径不能使用/dev/serial/by-id开头的路径，改为/dev/serial/by-path/下的路径，该路径和USB口的位置对应，如果后续打印机主板插到了HUB的另外一个USB口上，需要修改Klipper内[mcu]的Serial参数；
 
-* 温度控制HUB内散热风扇的开启和关闭，实际是设置屏幕串口的RTS引脚的电平，使用非海王星HUB时，如果有电子电路经验，自行搭建电路控制风扇也可；
+* 温度控制HUB内散热风扇的开启和关闭，实际是设置屏幕连接的串口的RTS引脚的电平，使用非海王星HUB时，如果有电子电路经验，自行搭建电路控制风扇也可；
 
 
 ## 海王星专用HUB
