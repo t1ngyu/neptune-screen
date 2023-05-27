@@ -275,6 +275,7 @@ class KlipperScreen(MoonrakerListener):
             pass
         elif method == 'notify_history_changed':
             action = data[0]['action']
+            logger.debug(data)
             if action == 'added':
                 self.screen.page_printing_init(data[0]['job']['filename'])
             elif action == 'finished':
@@ -282,8 +283,9 @@ class KlipperScreen(MoonrakerListener):
         elif method == 'notify_filelist_changed':
             path = data[0]['item']['path']
             directory = '/'
-            if '/' in directory:
-                directory = '/' + str(Path(path).parent)
+            if '/' in path:
+                directory = '/' + path.rsplit('/', maxsplit=1)[0]
+            logger.debug(f'fs change: path={path}, update_dir={directory}')
             if directory in self.fs:
                 del self.fs[directory]
         else:

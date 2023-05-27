@@ -108,7 +108,7 @@ class ScreenMixin:
         self.set_control_value('printspeed.txt', int(print_speed*100))
 
     def page_finish(self):
-        self.send_cmd('page finished')
+        self.send_cmd('page printfinish')
 
     def page_home(self):
        self.send_cmd('page warn_rdlevel') 
@@ -356,7 +356,7 @@ class AsyncSerialScreenProtocol(asyncio.Protocol):
         self.recv_data.extend(data)
         while len(self.recv_data) >= 3:
             if self.recv_data[0] != 0x5a or self.recv_data[1] != 0xa5:
-                logger.debug(f'{self.recv_data[0]:02x} ', end='')
+                logger.debug(f'{self.recv_data[0]:02x}')
                 self.recv_data.pop(0)
                 continue
             packet_size = self.recv_data[2]
