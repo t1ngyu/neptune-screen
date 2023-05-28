@@ -101,14 +101,15 @@ class ScreenMixin:
             self.send_cmd('exp0.path="ram/t.jpg"')
 
     def page_printing_update(self, progress, print_time, z, print_speed):
-        self.set_control_value('printprocess.val', int(progress*100))
-        self.set_control_value('printvalue.txt', str(int(progress*100)))
-        self.set_control_value('printtime.txt', print_time)
-        self.set_control_value('zvalue.val', int(z*100))
-        self.set_control_value('printspeed.txt', int(print_speed*100))
+        self.set_control_value('printpause.printprocess.val', int(progress*100))
+        self.set_control_value('printpause.printvalue.txt', str(int(progress*100)))
+        self.set_control_value('printpause.printtime.txt', print_time)
+        self.set_control_value('printpause.zvalue.val', int(z*100))
+        self.set_control_value('printpause.printspeed.txt', str(int(print_speed*100)))
 
-    def page_finish(self):
+    def page_finish(self, filename):
         self.send_cmd('page printfinish')
+        self.send_cmd(f'printfinish.file.txt="{filename}"')
 
     def page_home(self):
        self.send_cmd('page warn_rdlevel') 
@@ -246,72 +247,6 @@ class TJC(ScreenMixin):
 
     def write(self, msg):
         self.ser.write(msg)
-
-    def send_pic_from_txt_file(self, page, filename):
-        with open(filename, 'rb') as fp:
-            content = fp.read()
-        self.send_raw(b"printpause.va0.txt=")
-        self.send_raw(b'"')
-        self.send_raw(content)
-        self.send_raw(b'"')
-        self.send_raw(b"\xff\xff\xff")
-        time.sleep(0.1)
-        self.send_cmd(f"printpause.va1.txt=printpause.va0.txt")
-        time.sleep(0.2)
-        self.send_cmd(f"{page}.cp0.aph=127")
-        self.send_cmd(f"{page}.cp0.write(printpause.va1.txt)")
-
-    def send_pic_from_log_file(self, filename):
-        with open(filename, 'r') as fp:
-            lines = fp.readlines()
-        
-        for line in lines[912:956]:
-            if line.startswith('[delay]'):
-                delay = int(line.strip('\r\n').split(']')[1])
-                time.sleep(delay / 1000)
-            elif line.startswith('[write]'):
-                data = bytes.fromhex(line.strip('\r\n').split(']')[1])
-                self.send_raw(data)
-            else:
-                logger.debug(line.strip('\r\n'))
-
-    def send_pic_from_gcode_file(self, page, filename):
-        self.send_cmd(f"{page}.cp0.close()")
-        self.send_cmd(f"{page}.cp0.aph=0")
-        self.send_cmd("printpause.va1.txt=\"\"")
-        with open(filename, 'rb') as fp:
-            begin = False
-            while True:
-                data = fp.read(1024)
-                if not begin:
-                    if data.startswith(b';simage'):
-                        begin = True
-                    else:
-                        continue
-                logger.debug(data[:10], '....', data[-10:].hex(' '))
-                if data.startswith(b';simage'):
-                    self.send_raw(b"printpause.va0.txt=")
-                    self.send_raw(b'"')
-                    self.send_raw(data[8:1023])
-                    self.send_raw(b'"')
-                    self.send_raw(b"\xff\xff\xff")
-                    time.sleep(0.2)
-                    self.send_cmd("printpause.va1.txt+=printpause.va0.txt")
-                elif data.startswith(b';;simage'):
-                    self.send_raw(b"printpause.va0.txt=")
-                    self.send_raw(b'"')
-                    self.send_raw(data[9:1023])
-                    self.send_raw(b'"')
-                    self.send_raw(b"\xff\xff\xff")
-                    time.sleep(0.2)
-                    self.send_cmd("printpause.va1.txt+=printpause.va0.txt")
-                    self.send_cmd(f"{page}.cp0.aph=127")
-                    self.send_cmd(f"{page}.cp0.write(printpause.va1.txt)")
-                    break
-                elif data.startswith(';00000'):
-                    self.send_cmd(f"{page}.cp0.aph=127")
-                    self.send_cmd(f"{page}.cp0.write(printpause.va1.txt)")
-                    break
 
     def upload_file_to_ram(self, data, dst):
         self.ser.reset_input_buffer()

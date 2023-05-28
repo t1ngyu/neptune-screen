@@ -31,6 +31,7 @@ class KlipperScreen(MoonrakerListener):
         self.ip = ''
         self.version = ''
         self.fs = {}
+        self.cpu_fan_state = None
         self.extruder_temp = 0
         self.extruder_target_temp = 0
         self.bed_temp = 0
@@ -147,8 +148,6 @@ class KlipperScreen(MoonrakerListener):
                 await self.screen.page_ask_print(thumbnail)
         elif group == 'print':
             if fields[1] == 'start':
-                # if not self.homed_axes:
-                #     await self.call('printer.gcode.script', script='G28')
                 filename = data.split(' ', maxsplit=2)[-1].strip('/')
                 await self.call('printer.print.start', filename=filename)
             elif fields[1] == 'pause':
@@ -267,19 +266,24 @@ class KlipperScreen(MoonrakerListener):
         elif method == 'notify_proc_stat_update':
             # 根据CPU温度控制风扇的开和关
             cpu_temp = data[0]['cpu_temp']
-            if cpu_temp > self.config['FanStartTemp']:
+            if cpu_temp > self.config['FanStartTemp'] and self.cpu_fan_state != True:
+                self.cpu_fan_state = True
                 self.screen.set_fan(True)
-            elif cpu_temp < self.config['FanStopTemp']:
+                logger.info('start cpu fan.')
+            elif cpu_temp < self.config['FanStopTemp'] and self.cpu_fan_state != False:
+                self.cpu_fan_state = False
                 self.screen.set_fan(False)
+                logger.info('stop cpu fan.')
         elif method == 'notify_gcode_response':
             pass
         elif method == 'notify_history_changed':
             action = data[0]['action']
             logger.debug(data)
             if action == 'added':
-                self.screen.page_printing_init(data[0]['job']['filename'])
+                self.filename = data[0]['job']['filename']
+                self.screen.page_printing_init(self.filename)
             elif action == 'finished':
-                self.screen.page_finish()
+                self.screen.page_finish(self.filename)
         elif method == 'notify_filelist_changed':
             path = data[0]['item']['path']
             directory = '/'
