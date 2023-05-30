@@ -3,7 +3,7 @@ klipper_path=~
 cd "$(dirname "$0")"
 
 if [ ! -d ${klipper_path}/printer_data ]; then
-	echo Directory not found: ${klipper_path}/printer_datav
+	echo Directory not found: ${klipper_path}/printer_data
 	exit 1
 fi
 
@@ -14,7 +14,7 @@ venv/bin/python3 -m pip install -r requirements.txt
 
 # config moonraker
 if ! grep -q 'NeptuneScreen' ${klipper_path}/printer_data/moonraker.asvc ; then
-	echo NeptuneScreen >> ${klipper_path}/printer_data/moonraker.asvc
+	echo -e '\nNeptuneScreen' >> ${klipper_path}/printer_data/moonraker.asvc
 fi
 
 if ! grep -q 'NeptuneScreen' ${klipper_path}/printer_data/config/moonraker.conf ; then
