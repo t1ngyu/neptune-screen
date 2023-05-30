@@ -40,7 +40,7 @@ class KlipperScreen(MoonrakerListener):
         self.print_progress = 0
         self.print_duration = 0
         self.print_state = ''
-        self.filename = ''
+        self.filename = None
         self.led_state = 0
         self.fan_speed = 0
         self.z_value = 0
@@ -48,6 +48,8 @@ class KlipperScreen(MoonrakerListener):
         self.bed_mesh_profiles = None
         self.bed_mesh_profile_name = None
         self.bed_mesh_probed_matrix = None
+        self.current_file = None
+        self.file_position = 0
 
     async def start(self) -> None:
         logger.info('Start NeptuneScreen...')
@@ -199,10 +201,6 @@ class KlipperScreen(MoonrakerListener):
                 for name, val in category_data.items():
                     if name == 'speed':
                         vals['fan_speed'] = val
-            elif category == 'display_status':
-                for name, val in category_data.items():
-                    if name == 'progress':
-                        vals['print_progress'] = val
             elif category == 'gcode_move':
                 for name, val in category_data.items():
                     if name == 'speed_factor':
@@ -226,6 +224,11 @@ class KlipperScreen(MoonrakerListener):
                         vals['bed_mesh_profile_name'] = val
                     elif name =='profiles':
                         vals['bed_mesh_profiles'] = list(val.keys())
+            elif category == 'virtual_sdcard':
+                for name, val in category_data.items():
+                    if name == 'file_position':
+                        vals['file_position'] = val
+                        logger.debug(f'file_position: {val}')
             else:
                 logger.debug(f'{category}:{category_data}')
 
@@ -233,12 +236,30 @@ class KlipperScreen(MoonrakerListener):
             setattr(self, key, val)
         return vals
     
+    def get_print_progress(self):
+        gcode_start_byte = self.current_file['gcode_start_byte']
+        gcode_end_byte = self.current_file['gcode_end_byte']
+        file_position = self.file_position
+        if gcode_start_byte and gcode_end_byte:
+            if file_position <= gcode_start_byte:
+                return 0
+            elif file_position >= gcode_end_byte:
+                return 1
+
+            current_position = file_position - gcode_start_byte
+            end_position = gcode_end_byte - gcode_start_byte
+            if current_position > 0 and end_position > 0:
+                return current_position / end_position
+        return 0
+
     def get_print_left_time(self, duration, progress, speed):
-        if progress == 0:
-            progress = 0.001
-        total = duration / progress
-        file_left = (total - duration) / speed
-        return file_left
+        duration = self.print_duration
+        multiplier = self.print_speed
+        if progress > 0 and duration > 0:
+            file = duration / progress
+            fileLeft = (file - duration) / multiplier
+            return fileLeft
+        return 0
 
     def format_time(self, duration):
         duration = int(duration)
@@ -281,9 +302,12 @@ class KlipperScreen(MoonrakerListener):
             logger.debug(data)
             if action == 'added':
                 self.filename = data[0]['job']['filename']
+                self.current_file = await self.call('server.files.metadata', filename=self.filename)
                 self.screen.page_printing_init(self.filename)
             elif action == 'finished':
                 self.screen.page_finish(self.filename)
+                self.current_file = None
+                self.filename = None
         elif method == 'notify_filelist_changed':
             path = data[0]['item']['path']
             directory = '/'
@@ -298,6 +322,7 @@ class KlipperScreen(MoonrakerListener):
         # 定时更新打印页面
         if time.time() - self.last_update_time >= 1:
             if self.print_state in ('printing', 'paused'):
+                self.print_progress = self.get_print_progress()
                 left_time = self.get_print_left_time(self.print_duration, self.print_progress, self.print_speed)
                 left_time_str = self.format_time(left_time)
                 self.screen.page_printing_update(self.print_progress, left_time_str, self.z_value, self.print_speed)
@@ -312,7 +337,7 @@ class KlipperScreen(MoonrakerListener):
         self.version = result['software_version'].split('-')[0]
         # Get IP address
         self.ip = await self._get_ip()
-        print(f'klipper version: {self.version} (@{self.ip})')
+        logger.info(f'klipper version: {self.version} (@{self.ip})')
         # Get file list
         self.fs['/'] = await self._get_files2('/')
 
@@ -331,10 +356,10 @@ class KlipperScreen(MoonrakerListener):
             'extruder': ['temperature', 'target'],
             'toolhead': ['position', 'homed_axes'],
             'fan': ['speed'],
-            'display_status': ['progress'],
             "gcode_move": ["speed_factor", "gcode_position"],
             'output_pin LED_pin': ['value'],
             'bed_mesh': ['probed_matrix', 'profile_name', 'profiles'],
+            'virtual_sdcard': ['file_position'],
         }
         data = await self.subscribe(subscribe_fields)
         # pprint(data)
@@ -343,6 +368,8 @@ class KlipperScreen(MoonrakerListener):
         logger.info(f'Startup State: {self.print_state}')
         self.screen.global_update(**vals)
         if self.print_state in ('printing', 'paused'):
+            self.current_file = await self.call('server.files.metadata', filename=self.filename)
+            self.print_progress = self.get_print_progress()
             thumbnail = await self.get_thumbnail(self.filename)
             self.screen.page_printing_init(self.filename, thumbnail)
             left_time = self.get_print_left_time(self.print_duration, self.print_progress, self.print_speed)
