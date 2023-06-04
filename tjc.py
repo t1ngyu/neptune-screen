@@ -191,45 +191,49 @@ class ScreenMixin:
         return True
 
     def scan_device(self):
-        baudrate_list = (512000, 921600)
+        baudrate_list = (512000, 115200, 9600, 921600)
         for baudrate in baudrate_list:
-            # dtime = (1000000 / baudrate + 50) / 1000
             self.ser.apply_settings({'baudrate': baudrate, 'timeout': 0.2})
-            settings = self.ser.get_settings()
-            logger.debug(settings)
+            logger.debug(f'Connect screen with baudrate: {baudrate}')
             self.ser.write(b'\x00\xff\xff\xff')
             self.ser.write(b'\x00\xff\xff\xff')
             time.sleep(0.1)
             self.ser.write(b'connect\xff\xff\xff')
             data = self.ser.read(10)
-            if data and b'comok' in data:
-                logger.debug('found baudrate')
-                return True
+            if data:
+                logger.debug(data)
+                if b'comok' in data:
+                    logger.debug('Connected.')
+                    return True
+        logger.error('Connect screen failed!')
 
-    def download_firmware(self, firmware):
-        if not self.scan_device():
-            return False
-        
+    def download_firmware(self, firmware, auto_connect=True):
+        if auto_connect:
+            if not self.scan_device():
+                return False
         with open(firmware, 'rb') as fp:
             content = fp.read()
         # 让屏幕进入卡顿2.5秒,防止现有工程不断发送数据干扰下载
-        self.ser.write(b'delay=2500\xff\xff\xff')
+        # self.ser.write(b'delay=2500\xff\xff\xff')
         # 1.5秒后发下载指令
+        DOWNLOAD_BAUDRATE = 921600
+        # DOWNLOAD_BAUDRATE = 9600
         time.sleep(1.5)
-        self.ser.write(f'whmi-wri {len(content)},921600,0'.encode() + b'\xff\xff\xff')
-        status = self.ser.read(10)
-        logger.debug(f'status1: {status}')
-        self.ser.apply_settings({'baudrate': 921600, 'timeout': 0.5})
-        time.sleep(0.13)
+        logger.debug(f'Switch baudrate to {DOWNLOAD_BAUDRATE}')
+        logger.debug(f'whmi-wri {len(content)},{DOWNLOAD_BAUDRATE},0')
+        self.ser.write(f'whmi-wri {len(content)},{DOWNLOAD_BAUDRATE},0'.encode() + b'\xff\xff\xff')
+        # 等待发送完毕，再修改波特率
+        time.sleep(0.2)
+        # 屏幕收到修改波特率命令后270ms后回复0x05，timeout设的久一点
+        self.ser.apply_settings({'baudrate': DOWNLOAD_BAUDRATE, 'timeout': 0.5})
         self.ser.reset_input_buffer()
         status = self.ser.read()
-        logger.debug(f'status: {status}')
+        logger.debug(f'Status: {status}')
         if status and status[0] == 0x05:
             CHUNK_SIZE = 4096
             i = 0
             while i < len(content):
                 chunk = content[i : i + CHUNK_SIZE]
-                # logger.debug(f'chunk[{i}/{len(content)}]')
                 self.ser.write(chunk)
                 status = self.ser.read()
                 if not status or status[0] != 0x05:
@@ -247,37 +251,22 @@ class TJC(ScreenMixin):
 
     def write(self, msg):
         self.ser.write(msg)
-
-    def upload_file_to_ram(self, data, dst):
+    
+    def close(self):
+        self.ser.close()
+    
+    def get_version(self):
         self.ser.reset_input_buffer()
-        self.send_raw(b'\x00\xff\xff\xff')
-        time.sleep(0.01)
-        self.send_cmd(f'twfile "ram/{dst}",{len(data)}')
-        val = self.read(4)
-        logger.debug(val.hex(' '))
-        time.sleep(0.3)
-        header = bytearray.fromhex('3a a1 bb 44 7f ff fe')
-        n = 0
-        chunk_size = 4000
-        for i in range(0, len(data), chunk_size):
-            wsize = chunk_size
-            if len(data) - i < chunk_size:
-                wsize = len(data) - i
-            info = struct.pack('<BHH', 0, n, wsize)
-            logger.debug(f'[{n}] {i:5d}, {wsize:5d} / {len(data):5d}')
-            self.send_raw(header + info)
-            logger.debug((header + info).hex(' '))
-            self.send_raw(data[i:i+wsize])
-            time.sleep(0.01)
-            val = self.read(1)
-            logger.debug(val.hex(' '))
-            n += 1
-        time.sleep(0.01)
-        self.send_raw(b'\x00\xff\xff\xff')
-        self.ser.reset_input_buffer()
-
-    def read(self, n=1):
-        return self.ser.read(n)
+        self.page_boot()
+        self.ser.apply_settings({'timeout': 1.5})
+        data = self.ser.read(30)
+        logger.debug(data)
+        if data:
+            pos = data.find(b'boot version=')
+            if pos == -1:
+                return None
+            data = data[pos:].decode().split('=')[-1]
+            return int(data)
     
 
 class AsyncSerialScreenProtocol(asyncio.Protocol):
@@ -298,7 +287,6 @@ class AsyncSerialScreenProtocol(asyncio.Protocol):
             if len(self.recv_data) < 3 + packet_size:
                 break
             packet = self.recv_data[0:3+packet_size]
-            # logger.debug(f'packet: {packet.hex(" ")}')
             if self.on_request:
                 data = packet[3:]
                 asyncio.create_task(self.on_request(data.decode('utf-8')))
@@ -366,12 +354,3 @@ class AsyncTJCScreen(ScreenMixin):
         finally:
             logger.debug('Switch serial back to async mode.')
             self.end_raw_serial()
-
-
-if __name__ == '__main__':
-    tjc = TJC('COM2')
-    # tjc.scan_device()
-    im = tjc.create_thumbnail('test.png', 160, 240, (255,0,0))
-    tjc.upload_file_to_ram(im, '0.jpg')
-    tjc.send_cmd('exp0.path="ram/0.jpg"')
-    logger.debug('done')

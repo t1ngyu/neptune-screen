@@ -22,9 +22,8 @@ logger.setLevel(logging.DEBUG)
 
 class KlipperScreen(MoonrakerListener):
 
-    def __init__(self, config_file):
-        with open(config_file, 'r') as fp:
-            self.config = json.load(fp)
+    def __init__(self, config):
+        self.config = config
         self.has_connected = False
         self.screen = tjc.AsyncTJCScreen()
         self.client = MoonrakerClient(self, self.config['Moonraker'])
@@ -431,9 +430,48 @@ class KlipperScreen(MoonrakerListener):
         return info['system_info']['network']['wlan0']['ip_addresses'][0]['address']
 
 
+def get_firmware_version(firmware_file):
+    MAGIC = b'boot version='
+    with open(firmware_file, 'rb') as fp:
+        content = fp.read()
+    pos = content.find(MAGIC)
+    if pos == -1:
+        return None
+    pos2 = content.find(b'"', pos, pos + 20)
+    ver = content[pos+len(MAGIC):pos2]
+    return int(ver)
+
+def check_and_update_firmware(config):
+    files = list(Path('~/printer_data/config').glob('*.tft'))
+    if files:
+        screen = tjc.TJC(config['Serial'])
+        if screen.download_firmware(files[0]):
+            files[0].unlink(True)
+        screen.close()
+    else:
+        files = list(Path('.').glob('*.tft'))
+        if files:
+            firmware_ver = get_firmware_version(files[0])
+            logger.info(f'Found firmware: {files[0]}, version: {firmware_ver}')
+            screen = tjc.TJC(config['Serial'])
+            if screen.scan_device():
+                ver = screen.get_version()
+                if ver is None or ver != firmware_ver:
+                    logger.debug(f'Update firmwire form {ver} to {firmware_ver}')
+                    screen.download_firmware(files[0])
+            screen.close()
+        else:
+            logger.info('Not found firmware!')
+
 async def main():
     config_file = Path('~/printer_data/config/neptune-screen.json').expanduser().resolve()
-    klipperScreen = KlipperScreen(config_file)
+    with open(config_file, 'r') as fp:
+        config = json.load(fp)
+
+    # 自动更新固件
+    check_and_update_firmware(config)
+
+    klipperScreen = KlipperScreen(config)
     await klipperScreen.start()
 
 if __name__ == "__main__":
