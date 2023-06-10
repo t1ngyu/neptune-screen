@@ -82,6 +82,8 @@ git clone https://gitee.com/t1ngyu/neptune-screen.git
 
 ### 注意事项
 
+* 串口下载固件失败，屏幕提示下载失败或者Data Error等，可能是屏幕连线太长导致。
+    下载失败不会损坏屏幕，重新下载即可。将屏幕拔掉重新插上，然后在fluidd中重启NeptuneScreen再次升级，多尝试几次即可；也可以将固件拷贝到SD卡中，插到屏幕上进行升级。
 * 海王星专用HUB上的USB转串口芯片与海王星主板的USB转串口芯片的VID/PID一样，因此串口路径不能使用/dev/serial/by-id开头的路径，改为/dev/serial/by-path/下的路径，该路径和USB口的位置对应，如果后续打印机主板插到了HUB的另外一个USB口上，需要修改Klipper内[mcu]的Serial参数；
 
 * 温度控制HUB内散热风扇的开启和关闭，实际是设置屏幕连接的串口的RTS引脚的电平，使用非海王星HUB时，如果有电子电路经验，自行搭建电路控制风扇也可；
