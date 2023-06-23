@@ -193,13 +193,13 @@ class ScreenMixin:
     def scan_device(self):
         baudrate_list = (512000, 115200, 9600, 921600)
         for baudrate in baudrate_list:
-            self.ser.apply_settings({'baudrate': baudrate, 'timeout': 0.2})
+            self.ser.apply_settings({'baudrate': baudrate, 'timeout': 0.4})
             logger.debug(f'Connect screen with baudrate: {baudrate}')
             self.ser.write(b'\x00\xff\xff\xff')
             self.ser.write(b'\x00\xff\xff\xff')
             time.sleep(0.1)
             self.ser.write(b'connect\xff\xff\xff')
-            data = self.ser.read(10)
+            data = self.ser.read(100)
             if data:
                 logger.debug(data)
                 if b'comok' in data:
@@ -213,8 +213,10 @@ class ScreenMixin:
                 return False
         with open(firmware, 'rb') as fp:
             content = fp.read()
+        logger.info('Begin update screen firmware...')
         # 让屏幕进入卡顿2.5秒,防止现有工程不断发送数据干扰下载
-        # self.ser.write(b'delay=2500\xff\xff\xff')
+        self.ser.write(b'delay=2500\xff\xff\xff')
+        self.ser.write(b'0\xff\xff\xff')
         # 1.5秒后发下载指令
         DOWNLOAD_BAUDRATE = 921600
         # DOWNLOAD_BAUDRATE = 9600
