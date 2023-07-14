@@ -129,6 +129,13 @@ class ScreenMixin:
                     self.send_cmd(f'x{index}.val={int(col*100)}')
                     index += 1
 
+    def warning(self, enabled):
+        if enabled:
+            self.send_cmd('cfgpio 7,3,0')
+            self.send_cmd('pwmf=2500')
+            self.send_cmd('pwm7=50')
+        else:
+            self.send_cmd('pwm7=0')
 
     def create_thumbnail(self, filename, width, height, fillcolor=0):
         import io

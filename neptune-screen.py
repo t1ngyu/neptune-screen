@@ -15,9 +15,9 @@ import tjc
 
 logging.basicConfig(format="[%(asctime)s][%(name)s][%(levelname)s]%(message)s")
 logging.getLogger('moonraker_api').setLevel(logging.FATAL)
-logging.getLogger('TJC').setLevel(logging.DEBUG)
+logging.getLogger('TJC').setLevel(logging.INFO)
 logger = logging.getLogger('KlipperScreen')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 class KlipperScreen(MoonrakerListener):
@@ -49,6 +49,7 @@ class KlipperScreen(MoonrakerListener):
         self.bed_mesh_probed_matrix = None
         self.current_file = None
         self.file_position = 0
+        self.filament_detected = False
 
     async def start(self) -> None:
         logger.info('Start NeptuneScreen...')
@@ -228,6 +229,11 @@ class KlipperScreen(MoonrakerListener):
                     if name == 'file_position':
                         vals['file_position'] = val
                         logger.debug(f'file_position: {val}')
+            elif category == 'filament_switch_sensor filament_sensor':
+                for name, val in category_data.items():
+                    if name == 'filament_detected':
+                        vals['filament_detected'] = val
+                        logger.debug(f'filament_detected: {val}')
             else:
                 logger.debug(f'{category}:{category_data}')
 
@@ -274,10 +280,13 @@ class KlipperScreen(MoonrakerListener):
     async def _on_notification(self, method: str, data: Any) -> None:
         if method == 'notify_status_update':
             vals = self.update_state(data[0])
-            if ('extruder_temp') in vals or ('extruder_target_temp' in vals):
+            if 'filament_detected' in vals:
+                if self.config.get('FilamentCheck', False) and self.print_state in ('printing', 'paused'):
+                    self.screen.warning(not self.filament_detected)
+            if 'extruder_temp' in vals or 'extruder_target_temp' in vals:
                 vals['extruder_temp'] = self.extruder_temp
                 vals['extruder_target_temp'] = self.extruder_target_temp
-            if ('bed_temp' in vals) or ('bed_target_temp' in vals):
+            if 'bed_temp' in vals or 'bed_target_temp' in vals:
                 vals['bed_temp'] = self.bed_temp
                 vals['bed_target_temp'] = self.bed_target_temp
             self.screen.global_update(**vals)
@@ -359,6 +368,7 @@ class KlipperScreen(MoonrakerListener):
             'output_pin LED_pin': ['value'],
             'bed_mesh': ['probed_matrix', 'profile_name', 'profiles'],
             'virtual_sdcard': ['file_position'],
+            'filament_switch_sensor filament_sensor': ['filament_detected'],
         }
         data = await self.subscribe(subscribe_fields)
         # pprint(data)

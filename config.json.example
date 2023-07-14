@@ -3,5 +3,6 @@
     "Baudrate": 512000,
     "Moonraker": "127.0.0.1",
     "FanStartTemp": 51,
-    "FanStopTemp": 49
+    "FanStopTemp": 49,
+    "FilamentCheck": true
 }
