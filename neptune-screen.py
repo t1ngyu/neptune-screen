@@ -294,15 +294,20 @@ class KlipperScreen(MoonrakerListener):
                 self.screen.page_printing_init()
         elif method == 'notify_proc_stat_update':
             # 根据CPU温度控制风扇的开和关
-            cpu_temp = data[0]['cpu_temp']
-            if cpu_temp > self.config['FanStartTemp'] and self.cpu_fan_state != True:
-                self.cpu_fan_state = True
-                self.screen.set_fan(True)
-                logger.info('start cpu fan.')
-            elif cpu_temp < self.config['FanStopTemp'] and self.cpu_fan_state != False:
-                self.cpu_fan_state = False
-                self.screen.set_fan(False)
-                logger.info('stop cpu fan.')
+            if 'cpu_temp' not in data[0]:
+                if self.cpu_fan_state == True:
+                    logger.info('no cpu_temp, stop fan.')
+                    self.screen.set_fan(False)
+            else:
+                cpu_temp = data[0]['cpu_temp']
+                if cpu_temp > self.config['FanStartTemp'] and self.cpu_fan_state != True:
+                    self.cpu_fan_state = True
+                    self.screen.set_fan(True)
+                    logger.info('start cpu fan.')
+                elif cpu_temp < self.config['FanStopTemp'] and self.cpu_fan_state != False:
+                    self.cpu_fan_state = False
+                    self.screen.set_fan(False)
+                    logger.info('stop cpu fan.')
         elif method == 'notify_gcode_response':
             pass
         elif method == 'notify_history_changed':
@@ -437,7 +442,13 @@ class KlipperScreen(MoonrakerListener):
 
     async def _get_ip(self):
         info = await self.call('machine.system_info')
-        return info['system_info']['network']['wlan0']['ip_addresses'][0]['address']
+        ip = ''
+        for name, interface in info['system_info']['network'].items():
+            for addr in interface['ip_addresses']:
+                if addr['family'] == 'ipv4':
+                    ip = addr['address']
+                    break
+        return ip
 
 
 def check_and_update_firmware(config: dict):
