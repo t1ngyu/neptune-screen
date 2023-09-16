@@ -296,11 +296,15 @@ class AsyncSerialScreenProtocol(asyncio.Protocol):
             if len(self.recv_data) < 3 + packet_size:
                 break
             packet = self.recv_data[0:3+packet_size]
-            if self.on_request:
-                data = packet[3:]
-                asyncio.create_task(self.on_request(data.decode('utf-8')))
-            self.recv_data = self.recv_data[len(packet):]
-            
+            try:
+                if self.on_request:
+                    data = packet[3:]
+                    asyncio.create_task(self.on_request(data.decode('utf-8')))
+                self.recv_data = self.recv_data[len(packet):]
+            except Exception as e:
+                logger.error(e)
+                self.recv_data.clear()
+
     def pause_reading(self):
         # This will stop the callbacks to data_received
         self.transport.pause_reading()
