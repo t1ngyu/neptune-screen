@@ -8,7 +8,6 @@ WantedBy=multi-user.target
 
 [Service]
 Type=simple
-User=klipper
 SupplementaryGroups=moonraker-admin
 RemainAfterExit=yes
 WorkingDirectory=ROOT_DIR

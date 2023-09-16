@@ -27,6 +27,7 @@ cp config.json.example ${klipper_path}/printer_data/config/neptune-screen.json
 
 # create NeptuneScreen.service
 sed "s#ROOT_DIR#`pwd`#g" NeptuneScreen.service.tpl > NeptuneScreen.service
+echo User=`whoami` >> NeptuneScreen.service
 
 # install NeptuneScreen service
 if [ -e /etc/systemd/system/NeptuneScreen.service ]; then
