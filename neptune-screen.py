@@ -316,7 +316,8 @@ class KlipperScreen(MoonrakerListener):
             if action == 'added':
                 self.filename = data[0]['job']['filename']
                 self.current_file = await self.call('server.files.metadata', filename=self.filename)
-                self.screen.page_printing_init(self.filename)
+                thumbnail = await self.get_thumbnail(self.filename)
+                self.screen.page_printing_init(self.filename, thumbnail)
             elif action == 'finished':
                 self.screen.page_finish(self.filename)
                 self.current_file = None
